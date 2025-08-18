@@ -1,0 +1,11 @@
+fastapi>=0.112.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+httpx>=0.27.0
+pydantic>=2.7.0
+# Official Google AI Python SDK for Gemini (import as: from google import genai)
+google-genai>=0.3.0
+python-dotenv>=1.0.1
+supabase>=2.4.0
+pypdf>=4.2.0
+requests>=2.32.0
