@@ -31,6 +31,7 @@ MANIFEST
 venv/
 ENV/
 env/
+.env.example
 venv-new-1755708907/
 # IDE
 .vscode/
