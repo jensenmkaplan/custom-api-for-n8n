@@ -17,9 +17,9 @@ async def analyze_documents(
     files: Optional[List[UploadFile]] = File(None, description="One or more PDF files (optional when using Dropbox)"),
     model: Optional[str] = Form(None, description="Override model (e.g., gemini-2.5-flash)"),
     use_files_api: bool = Form(False, description="Use Files API upload instead of inline bytes"),
-    use_dropbox: bool = Form(False, description="If true, fetch PDFs from Dropbox using dropbox_paths or dropbox_ids"),
-    dropbox_paths: Optional[str] = Form(None, description="Comma-separated Dropbox file paths to fetch (required if use_dropbox=true and dropbox_ids not provided)"),
-    dropbox_ids: Optional[str] = Form(None, description="Comma-separated Dropbox file IDs to fetch (optional alternative to dropbox_paths)") ,
+    use_dropbox: bool = Query(False, description="If true, fetch PDFs from Dropbox using dropbox_paths or dropbox_ids"),
+    dropbox_paths: Optional[str] = Query(None, description="Comma-separated Dropbox file paths to fetch (required if use_dropbox=true and dropbox_ids not provided)"),
+    dropbox_ids: Optional[str] = Query(None, description="Comma-separated Dropbox file IDs to fetch (optional alternative to dropbox_paths)"),
 ) -> AnalyzeResponse:
     try:
         # prefer form instructions, then query instructions
