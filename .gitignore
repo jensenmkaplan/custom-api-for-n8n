@@ -31,7 +31,7 @@ MANIFEST
 venv/
 ENV/
 env/
-
+venv-new-1755708907/
 # IDE
 .vscode/
 .idea/
