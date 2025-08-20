@@ -13,7 +13,7 @@ router = APIRouter(tags=["analyze"])
 async def analyze_documents(
     instructions_form: Optional[str] = Form(None, description="Instructions to guide the analysis (form)"),
     instructions_query: Optional[str] = Query(None, description="Instructions to guide the analysis (query string, used when sending JSON body)"),
-    dropbox_object: Optional[list] = Body(None, description="Optional JSON payload (array/object) containing Dropbox file metadata from which IDs will be extracted"),
+    body_payload: Optional[object] = Body(None, description="Optional JSON payload (array/object) containing Dropbox file metadata from which IDs will be extracted; may also carry 'instructions'") ,
     files: Optional[List[UploadFile]] = File(None, description="One or more PDF files (optional when using Dropbox)"),
     model: Optional[str] = Form(None, description="Override model (e.g., gemini-2.5-flash)"),
     use_files_api: bool = Form(False, description="Use Files API upload instead of inline bytes"),
@@ -22,10 +22,19 @@ async def analyze_documents(
     dropbox_ids: Optional[str] = Query(None, description="Comma-separated Dropbox file IDs to fetch (optional alternative to dropbox_paths)"),
 ) -> AnalyzeResponse:
     try:
-        # prefer form instructions, then query instructions
+        # prefer form instructions, then query instructions, then instructions inside JSON body
         instructions = instructions_form or instructions_query
         if not instructions:
-            raise HTTPException(status_code=400, detail="instructions is required (form or query string when sending JSON body)")
+            # check body payload for an 'instructions' field (allow dict or list containing dict)
+            if isinstance(body_payload, dict) and body_payload.get("instructions"):
+                instructions = body_payload.get("instructions")
+            elif isinstance(body_payload, list):
+                for elem in body_payload:
+                    if isinstance(elem, dict) and elem.get("instructions"):
+                        instructions = elem.get("instructions")
+                        break
+        if not instructions:
+            raise HTTPException(status_code=400, detail="instructions is required (form, query string, or JSON body)")
         pdf_bytes_list: List[bytes] = []
 
         if use_dropbox:
@@ -35,25 +44,37 @@ async def analyze_documents(
                 if dropbox_ids:
                     ids = [d.strip() for d in dropbox_ids.split(",") if d.strip()]
                     pdf_bytes_list = db.download_ids(ids)
-                elif dropbox_object:
-                    # extract ids from provided JSON object which may be a list/containers
+                else:
+                    # extract ids from provided JSON body payload which may be a list/containers or a dict
                     ids: List[str] = []
-                    # expecting structure like: [ { "data": [ {"id": "id:..."}, ... ] } ]
                     try:
-                        for container in dropbox_object:
-                            data = container.get("data") if isinstance(container, dict) else None
+                        containers = []
+                        if isinstance(body_payload, list):
+                            containers = body_payload
+                        elif isinstance(body_payload, dict):
+                            containers = [body_payload]
+
+                        for container in containers:
+                            if not isinstance(container, dict):
+                                continue
+                            data = container.get("data")
                             if isinstance(data, list):
                                 for item in data:
                                     if isinstance(item, dict) and item.get("id"):
                                         ids.append(item["id"])
                             # support top-level objects with an id
-                            elif isinstance(container, dict) and container.get("id"):
+                            if container.get("id"):
                                 ids.append(container.get("id"))
                     except Exception:
-                        raise HTTPException(status_code=400, detail="Invalid dropbox_object structure")
+                        raise HTTPException(status_code=400, detail="Invalid JSON body structure for Dropbox IDs")
                     if not ids:
-                        raise HTTPException(status_code=400, detail="No ids found in dropbox_object")
-                    pdf_bytes_list = db.download_ids(ids)
+                        # fallback to dropbox_paths if provided
+                        if not dropbox_paths:
+                            raise HTTPException(status_code=400, detail="dropbox_paths or dropbox_ids or JSON body with ids is required when use_dropbox is true")
+                        paths = [p.strip() for p in dropbox_paths.split(",") if p.strip()]
+                        pdf_bytes_list = db.download_paths(paths)
+                    else:
+                        pdf_bytes_list = db.download_ids(ids)
                 else:
                     if not dropbox_paths:
                         raise HTTPException(status_code=400, detail="dropbox_paths or dropbox_ids is required when use_dropbox is true")
