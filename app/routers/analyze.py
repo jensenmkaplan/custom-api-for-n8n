@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Body, Query
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Body, Query, Header
 
 from ..gemini_client import GeminiClient
 from ..schemas import AnalyzeResponse
@@ -11,6 +11,7 @@ router = APIRouter(tags=["analyze"])
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_documents(
+    instructions_header: Optional[str] = Header(None, alias="X-Instructions", description="Instructions provided via header (preferred)") ,
     instructions_form: Optional[str] = Form(None, description="Instructions to guide the analysis (form)"),
     instructions_query: Optional[str] = Query(None, description="Instructions to guide the analysis (query string, used when sending JSON body)"),
     body_payload: Optional[object] = Body(None, description="Optional JSON payload (array/object) containing Dropbox file metadata from which IDs will be extracted; may also carry 'instructions'") ,
@@ -22,8 +23,8 @@ async def analyze_documents(
     dropbox_ids: Optional[str] = Query(None, description="Comma-separated Dropbox file IDs to fetch (optional alternative to dropbox_paths)"),
 ) -> AnalyzeResponse:
     try:
-        # prefer form instructions, then query instructions, then instructions inside JSON body
-        instructions = instructions_form or instructions_query
+        # prefer header, then form instructions, then query instructions, then instructions inside JSON body
+        instructions = instructions_header or instructions_form or instructions_query
         if not instructions:
             # Look for instructions in the JSON body payload in several common shapes
             def _extract_instructions(obj):
@@ -63,7 +64,7 @@ async def analyze_documents(
                 instructions = instr
 
         if not instructions:
-            raise HTTPException(status_code=400, detail="instructions is required (form, query string, or JSON body)")
+            raise HTTPException(status_code=400, detail="instructions is required (header, form, query string, or JSON body)")
         pdf_bytes_list: List[bytes] = []
 
         if use_dropbox:
