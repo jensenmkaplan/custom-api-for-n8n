@@ -130,3 +130,109 @@ async def analyze_documents(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# JSON-only variant to allow raw JSON body in clients like n8n without multipart constraints
+@router.post("/analyze/json", response_model=AnalyzeResponse)
+async def analyze_documents_json(
+    instructions_header: Optional[str] = Header(None, alias="X-Instructions", description="Instructions provided via header (preferred)"),
+    instructions_query: Optional[str] = Query(None, description="Instructions to guide the analysis (query string, alternative to header/body)"),
+    body: Optional[object] = Body(None, description="JSON payload containing either 'instructions' and/or a structure with Dropbox IDs (e.g., under data)") ,
+    use_dropbox: bool = Query(False, description="If true, fetch PDFs from Dropbox using IDs from the JSON body or via dropbox_ids/dropbox_paths"),
+    dropbox_paths: Optional[str] = Query(None, description="Comma-separated Dropbox file paths to fetch (used if IDs not in body and dropbox_ids not provided)"),
+    dropbox_ids: Optional[str] = Query(None, description="Comma-separated Dropbox file IDs to fetch (optional alternative to providing IDs in JSON body)"),
+    model: Optional[str] = Query(None, description="Override model (e.g., gemini-2.5-flash)"),
+    use_files_api: bool = Query(False, description="Use Files API upload instead of inline bytes (kept for parity; typically false here)"),
+) -> AnalyzeResponse:
+    try:
+        # 1) Resolve instructions: header -> query -> body
+        def _extract_instructions(obj: object) -> Optional[str]:
+            if isinstance(obj, dict):
+                if obj.get("instructions"):
+                    return obj.get("instructions")  # type: ignore[return-value]
+                for key in ("body", "payload", "data"):
+                    val = obj.get(key)
+                    if isinstance(val, dict) and val.get("instructions"):
+                        return val.get("instructions")  # type: ignore[return-value]
+                    if isinstance(val, list):
+                        for item in val:
+                            if isinstance(item, dict) and item.get("instructions"):
+                                return item.get("instructions")  # type: ignore[return-value]
+                return None
+            if isinstance(obj, list):
+                for elem in obj:
+                    if isinstance(elem, dict):
+                        if elem.get("instructions"):
+                            return elem.get("instructions")  # type: ignore[return-value]
+                        for key in ("body", "payload", "data"):
+                            val = elem.get(key)
+                            if isinstance(val, dict) and val.get("instructions"):
+                                return val.get("instructions")  # type: ignore[return-value]
+                            if isinstance(val, list):
+                                for item in val:
+                                    if isinstance(item, dict) and item.get("instructions"):
+                                        return item.get("instructions")  # type: ignore[return-value]
+                return None
+            return None
+
+        instructions = instructions_header or instructions_query or _extract_instructions(body)
+        if not instructions:
+            raise HTTPException(status_code=400, detail="instructions is required (header, query string, or JSON body)")
+
+        # 2) Build list of PDF bytes
+        pdf_bytes_list: List[bytes] = []
+        if use_dropbox:
+            try:
+                db = DropboxClient()
+                ids_from_query: List[str] = []
+                if dropbox_ids:
+                    ids_from_query = [d.strip() for d in dropbox_ids.split(",") if d.strip()]
+
+                ids_from_body: List[str] = []
+                if body is not None:
+                    containers = []
+                    if isinstance(body, list):
+                        containers = body
+                    elif isinstance(body, dict):
+                        containers = [body]
+                    for container in containers:
+                        if not isinstance(container, dict):
+                            continue
+                        data = container.get("data")
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, dict) and item.get("id"):
+                                    ids_from_body.append(item["id"])  # type: ignore[arg-type]
+                        if container.get("id"):
+                            ids_from_body.append(container.get("id"))  # type: ignore[arg-type]
+
+                ids = ids_from_query or ids_from_body
+                if ids:
+                    pdf_bytes_list = db.download_ids(ids)
+                else:
+                    if not dropbox_paths:
+                        raise HTTPException(status_code=400, detail="dropbox_paths or dropbox_ids or JSON body with ids is required when use_dropbox is true")
+                    paths = [p.strip() for p in dropbox_paths.split(",") if p.strip()]
+                    pdf_bytes_list = db.download_paths(paths)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Dropbox download failed: {exc}") from exc
+        else:
+            raise HTTPException(status_code=400, detail="JSON endpoint only supports Dropbox mode; use /v1/analyze for file uploads")
+
+        if not pdf_bytes_list:
+            raise HTTPException(status_code=400, detail="No PDF bytes available for analysis")
+
+        client = GeminiClient()
+        text = client.generate_from_pdfs(
+            instructions=instructions,
+            pdf_bytes_list=pdf_bytes_list,
+            model=model,
+            use_files_api=use_files_api,
+        )
+        return AnalyzeResponse(text=text)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
