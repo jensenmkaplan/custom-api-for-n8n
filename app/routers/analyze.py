@@ -25,14 +25,43 @@ async def analyze_documents(
         # prefer form instructions, then query instructions, then instructions inside JSON body
         instructions = instructions_form or instructions_query
         if not instructions:
-            # check body payload for an 'instructions' field (allow dict or list containing dict)
-            if isinstance(body_payload, dict) and body_payload.get("instructions"):
-                instructions = body_payload.get("instructions")
-            elif isinstance(body_payload, list):
-                for elem in body_payload:
-                    if isinstance(elem, dict) and elem.get("instructions"):
-                        instructions = elem.get("instructions")
-                        break
+            # Look for instructions in the JSON body payload in several common shapes
+            def _extract_instructions(obj):
+                if isinstance(obj, dict):
+                    # direct field
+                    if obj.get("instructions"):
+                        return obj.get("instructions")
+                    # nested containers commonly named 'body', 'payload', or 'data'
+                    for key in ("body", "payload", "data"):
+                        val = obj.get(key)
+                        if isinstance(val, dict) and val.get("instructions"):
+                            return val.get("instructions")
+                        if isinstance(val, list):
+                            for item in val:
+                                if isinstance(item, dict) and item.get("instructions"):
+                                    return item.get("instructions")
+                    return None
+                elif isinstance(obj, list):
+                    for elem in obj:
+                        if isinstance(elem, dict) and elem.get("instructions"):
+                            return elem.get("instructions")
+                        # also check nested 'body' inside list elements
+                        if isinstance(elem, dict):
+                            for key in ("body", "payload", "data"):
+                                val = elem.get(key)
+                                if isinstance(val, dict) and val.get("instructions"):
+                                    return val.get("instructions")
+                                if isinstance(val, list):
+                                    for item in val:
+                                        if isinstance(item, dict) and item.get("instructions"):
+                                            return item.get("instructions")
+                    return None
+                return None
+
+            instr = _extract_instructions(body_payload)
+            if instr:
+                instructions = instr
+
         if not instructions:
             raise HTTPException(status_code=400, detail="instructions is required (form, query string, or JSON body)")
         pdf_bytes_list: List[bytes] = []
