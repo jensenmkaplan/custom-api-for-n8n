@@ -28,7 +28,7 @@ def dropbox_oauth_start(redirect_uri: Optional[str] = Query(None, description="C
 
     # Default redirect if not provided
     if not redirect_uri:
-        redirect_uri = "http://localhost:8000/v1/dropbox/oauth/callback"
+        redirect_uri = "https://custom-api-for-n8n.onrender.com/v1/dropbox/oauth/callback"
 
     state = secrets.token_urlsafe(16)
     _oauth_state_store[state] = time.time()
@@ -62,7 +62,7 @@ def dropbox_oauth_callback(code: str = Query(...), state: str = Query(...), redi
         raise HTTPException(status_code=500, detail="Missing DROPBOX_APP_KEY or DROPBOX_APP_SECRET in environment")
 
     if not redirect_uri:
-        redirect_uri = "http://localhost:8000/v1/dropbox/oauth/callback"
+        redirect_uri = "https://custom-api-for-n8n.onrender.com/v1/dropbox/oauth/callback"
 
     token_url = "https://api.dropboxapi.com/oauth2/token"
     data = {
@@ -77,6 +77,32 @@ def dropbox_oauth_callback(code: str = Query(...), state: str = Query(...), redi
 
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=f"Token exchange failed: {resp.text}")
+
+    return resp.json()
+
+
+@router.post("/dropbox/oauth/refresh")
+def dropbox_oauth_refresh(refresh_token: str = Query(..., description="Dropbox refresh token to exchange for a new access token")) -> dict:
+    """Exchange a refresh token for a new access token.
+
+    Note: For server-side use, prefer configuring DROPBOX_REFRESH_TOKEN, DROPBOX_APP_KEY, DROPBOX_APP_SECRET
+    in environment variables. This endpoint is provided for manual testing.
+    """
+    if not APP_KEY or not APP_SECRET:
+        raise HTTPException(status_code=500, detail="Missing DROPBOX_APP_KEY or DROPBOX_APP_SECRET in environment")
+
+    token_url = "https://api.dropboxapi.com/oauth2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    try:
+        resp = requests.post(token_url, data=data, auth=(APP_KEY, APP_SECRET), timeout=15)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Refresh request failed: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=f"Refresh failed: {resp.text}")
 
     return resp.json()
 
