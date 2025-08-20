@@ -26,4 +26,14 @@ class DropboxClient:
             results.append(res.content)
         return results
 
+    def download_ids(self, ids: List[str]) -> List[bytes]:
+        """Download files by Dropbox file IDs. Uses the 'id:<file_id>' syntax supported by files_download."""
+        results: List[bytes] = []
+        for fid in ids:
+            # Normalize id string
+            arg = fid if fid.startswith("id:") else f"id:{fid}"
+            metadata, res = self.client.files_download(arg)
+            results.append(res.content)
+        return results
+
 
