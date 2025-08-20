@@ -38,7 +38,7 @@ async def analyze_documents(
         pdf_bytes_list: List[bytes] = []
 
         if use_dropbox:
-            # Prefer explicit IDs if provided
+            # Prefer explicit IDs if provided; otherwise extract from JSON body, then fallback to paths
             try:
                 db = DropboxClient()
                 if dropbox_ids:
@@ -67,19 +67,15 @@ async def analyze_documents(
                                 ids.append(container.get("id"))
                     except Exception:
                         raise HTTPException(status_code=400, detail="Invalid JSON body structure for Dropbox IDs")
-                    if not ids:
+
+                    if ids:
+                        pdf_bytes_list = db.download_ids(ids)
+                    else:
                         # fallback to dropbox_paths if provided
                         if not dropbox_paths:
                             raise HTTPException(status_code=400, detail="dropbox_paths or dropbox_ids or JSON body with ids is required when use_dropbox is true")
                         paths = [p.strip() for p in dropbox_paths.split(",") if p.strip()]
                         pdf_bytes_list = db.download_paths(paths)
-                    else:
-                        pdf_bytes_list = db.download_ids(ids)
-                else:
-                    if not dropbox_paths:
-                        raise HTTPException(status_code=400, detail="dropbox_paths or dropbox_ids is required when use_dropbox is true")
-                    paths = [p.strip() for p in dropbox_paths.split(",") if p.strip()]
-                    pdf_bytes_list = db.download_paths(paths)
             except HTTPException:
                 raise
             except Exception as exc:
